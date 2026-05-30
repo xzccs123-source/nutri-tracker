@@ -113,6 +113,9 @@ td{font-weight:300}
 
 /* Empty */
 .empty{padding:28px;text-align:center;color:var(--c5);font-size:.82rem}
+.util-bar{display:flex;gap:12px;justify-content:center;padding:16px 0 0;border-top:1px solid var(--c7);margin-top:28px}
+.util-bar button{font-size:.72rem;color:var(--c5);letter-spacing:.04em;padding:4px 0;border-bottom:1px dotted var(--c6);transition:all .15s}
+.util-bar button:hover{color:var(--c0);border-bottom-color:var(--c0)}
 
 /* inline form */
 .inline-form{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:14px}
@@ -219,6 +222,11 @@ hr.divider{border:none;border-top:1px solid var(--c7);margin:20px 0}
       </div>
     </div>
   </section>
+  <div class="util-bar">
+    <button id="btn-export">导出数据</button>
+    <button id="btn-import">导入数据</button>
+    <input type="file" id="import-file" accept=".json" style="display:none">
+  </div>
 </main>
 
 <!-- Food picker overlay -->
@@ -606,6 +614,71 @@ document.getElementById('btn-save-goals').addEventListener('click',()=>{
   save();
   toast('目标已保存');
   renderRecord();
+});
+
+// ============ IMPORT / EXPORT ============
+document.getElementById('btn-export').addEventListener('click',()=>{
+  const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='nutri-tracker-backup-'+ts()+'.json';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('数据已导出');
+});
+
+document.getElementById('btn-import').addEventListener('click',()=>{
+  document.getElementById('import-file').click();
+});
+
+document.getElementById('import-file').addEventListener('change',e=>{
+  const file=e.target.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const imported=JSON.parse(ev.target.result);
+      if(!imported.targets&&!imported.foods&&!imported.meals&&!imported.measurements){
+        toast('文件格式不正确');return;
+      }
+      // Merge: imported data takes priority for same keys
+      if(imported.targets) d.targets={...d.targets,...imported.targets};
+      if(imported.foods){
+        const existIds=new Set(d.foods.map(f=>f.id));
+        imported.foods.forEach(f=>{if(!existIds.has(f.id)){d.foods.push(f);existIds.add(f.id);}});
+      }
+      if(imported.meals){
+        Object.entries(imported.meals).forEach(([date,meals])=>{
+          if(!d.meals[date]){d.meals[date]=meals;}
+          else{
+            MEALS.forEach(m=>{
+              const existing=d.meals[date][m]||[];
+              const incoming=meals[m]||[];
+              const merged=[...existing];
+              incoming.forEach(item=>{
+                const idx=merged.findIndex(x=>x.foodId===item.foodId);
+                if(idx>=0){merged[idx].servings=Math.max(merged[idx].servings,item.servings);}
+                else{merged.push(item);}
+              });
+              d.meals[date][m]=merged;
+            });
+          }
+        });
+      }
+      if(imported.measurements){
+        imported.measurements.forEach(imp=>{
+          const idx=d.measurements.findIndex(m=>m.date===imp.date);
+          if(idx>=0)d.measurements[idx]=imp;else d.measurements.push(imp);
+        });
+        d.measurements.sort((a,b)=>a.date.localeCompare(b.date));
+      }
+      save();
+      toast('数据已导入并合并');
+      renderRecord();renderGoals();renderFoods();
+    }catch(err){toast('文件解析失败');}
+  };
+  reader.readAsText(file);
+  e.target.value='';
 });
 
 // ============ INIT ============
